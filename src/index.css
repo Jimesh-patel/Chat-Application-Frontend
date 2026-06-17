@@ -10,10 +10,17 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(34, 211, 238, 0.12), transparent 24%),
     #020617;

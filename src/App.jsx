@@ -4,11 +4,14 @@ import { BrowserRouter, Navigate, Route, Routes, Link, useNavigate } from 'react
 import BasePage from './pages/BasePage'
 import AuthPage from './pages/AuthPage'
 import HomePage from './pages/HomePage'
-import { isAuthenticated, logoutUser } from './services/auth'
+import ProfilePage from './pages/ProfilePage'
+import { getStoredUser, isAuthenticated, logoutUser } from './services/auth'
+import { SignalRProvider } from './context/SignalRContext'
 
 function AppShell() {
   const navigate = useNavigate()
   const authenticated = isAuthenticated()
+  const currentUser = getStoredUser()
 
   useEffect(() => {
     const handleSessionExpired = () => {
@@ -33,9 +36,9 @@ function AppShell() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-white/10 bg-slate-900/80 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+    <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <header className="border-b border-sky-200/10 bg-slate-900/85 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <Link to={authenticated ? '/home' : '/'} className="text-xl font-semibold text-white">
             ChatWave
           </Link>
@@ -43,8 +46,8 @@ function AppShell() {
           <nav className="flex items-center gap-3">
             {authenticated ? (
               <>
-                <Link to="/home" className="rounded-full px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white">
-                  Home
+                <Link to="/profile" className="rounded-full px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10 hover:text-white">
+                  {currentUser?.username || 'Profile'}
                 </Link>
                 <button
                   onClick={handleLogout}
@@ -67,12 +70,13 @@ function AppShell() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <main className="flex-1 overflow-hidden px-3 py-3 sm:px-6 sm:py-4 lg:px-8 lg:py-5">
         <Routes>
           <Route path="/" element={<BasePage />} />
           <Route path="/signup" element={authenticated ? <Navigate to="/home" replace /> : <AuthPage mode="signup" />} />
           <Route path="/login" element={authenticated ? <Navigate to="/home" replace /> : <AuthPage mode="login" />} />
           <Route path="/home" element={authenticated ? <HomePage /> : <Navigate to="/login" replace />} />
+          <Route path="/profile" element={authenticated ? <ProfilePage /> : <Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -83,7 +87,9 @@ function AppShell() {
 function App() {
   return (
     <BrowserRouter>
-      <AppShell />
+      <SignalRProvider>
+        <AppShell />
+      </SignalRProvider>
     </BrowserRouter>
   )
 }
