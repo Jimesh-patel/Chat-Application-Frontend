@@ -1,11 +1,7 @@
-import { createContext, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { chatHub } from '../services/signalr/chatHub'
 import { isAuthenticated } from '../services/auth'
-
-export const SignalRContext = createContext({
-  isConnected: false,
-  connection: null,
-})
+import { SignalRContext } from './signalRContextValue'
 
 export function SignalRProvider({ children }) {
   const [isConnected, setIsConnected] = useState(false)

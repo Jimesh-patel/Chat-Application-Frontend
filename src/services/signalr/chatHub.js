@@ -229,6 +229,14 @@ class ChatHub {
     return this.invoke('MarkMessageSeen', conversationId, messageId)
   }
 
+  async userTyping(command) {
+    return this.invoke('UserTyping', command)
+  }
+
+  async stopTyping(command) {
+    return this.invoke('StopTyping', command)
+  }
+
   getState() {
     return this.connection?.state || 'Disconnected'
   }

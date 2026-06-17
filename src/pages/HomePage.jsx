@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { request, getCurrentUserId } from '../services/auth'
 import { useChatHub } from '../hooks/useChatHub'
-import { MessageList } from '../components/MessageList'
-import { UserSearchList } from '../components/UserSearchList'
 import { MessageStatus, normalizeStatus } from '../components/MessageStatus'
 import { formatDisplayName } from '../utils/formatters'
+import { ChatLayout } from '../components/chat/ChatLayout'
+import { Sidebar } from '../components/chat/Sidebar'
+import { ChatArea } from '../components/chat/ChatArea'
+
+const TYPING_STOP_DELAY_MS = 1500
 
 function HomePage() {
   const [users, setUsers] = useState([])
@@ -14,16 +17,25 @@ function HomePage() {
   const [search, setSearch] = useState('')
   const [draft, setDraft] = useState('')
   const [status, setStatus] = useState('')
+  const [typingByConversation, setTypingByConversation] = useState({})
   const [loading, setLoading] = useState({ users: false, conversations: false, messages: false, sending: false })
   const currentUserId = useMemo(() => getCurrentUserId(), [])
+  const activeConversationId = activeConversation?.conversationId
+  const typingStopTimerRef = useRef(null)
+  const typingSentRef = useRef(false)
+  const typingConversationIdRef = useRef(null)
 
   // Initialize SignalR connection
   const {
     isConnected,
     subscribeToMessages,
     subscribeToSeenUpdates,
+    subscribeToUserTyping,
+    subscribeToStopTyping,
     sendMessage,
     markMessageSeen,
+    userTyping,
+    stopTyping,
   } = useChatHub()
 
   const filteredUsers = useMemo(() => {
@@ -89,7 +101,7 @@ function HomePage() {
     [activeConversation?.participantB?.id, currentUserId]
   )
 
-  const loadMessages = async (conversationId) => {
+  const loadMessages = useCallback(async (conversationId) => {
     if (!conversationId) {
       setMessages([])
       return
@@ -105,18 +117,22 @@ function HomePage() {
     } finally {
       setLoading((current) => ({ ...current, messages: false }))
     }
-  }
+  }, [normalizeMessage])
 
   useEffect(() => {
-    loadUsers()
-    loadConversations()
+    queueMicrotask(() => {
+      loadUsers()
+      loadConversations()
+    })
   }, [])
 
   useEffect(() => {
-    if (activeConversation?.conversationId) {
-      loadMessages(activeConversation.conversationId)
+    if (activeConversationId) {
+      queueMicrotask(() => {
+        loadMessages(activeConversationId)
+      })
     }
-  }, [activeConversation?.conversationId])
+  }, [activeConversationId, loadMessages])
 
   const updateConversationWithMessage = useCallback((message) => {
     setConversations((current) => {
@@ -139,6 +155,116 @@ function HomePage() {
     })
   }, [])
 
+  const activeTypingUserIds = useMemo(() => {
+    if (!activeConversationId) {
+      return []
+    }
+
+    return typingByConversation[activeConversationId] || []
+  }, [activeConversationId, typingByConversation])
+
+  const isActiveParticipantTyping = activeConversation?.participantB?.id
+    ? activeTypingUserIds.includes(activeConversation.participantB.id)
+    : false
+
+  const isParticipantTyping = useCallback(
+    (conversation) => {
+      const conversationTypingUsers = typingByConversation[conversation.conversationId] || []
+      return conversation.participantB?.id
+        ? conversationTypingUsers.includes(conversation.participantB.id)
+        : conversationTypingUsers.length > 0
+    },
+    [typingByConversation]
+  )
+
+  const clearTypingTimer = useCallback(() => {
+    if (typingStopTimerRef.current) {
+      clearTimeout(typingStopTimerRef.current)
+      typingStopTimerRef.current = null
+    }
+  }, [])
+
+  const notifyStopTyping = useCallback(
+    async (conversationId = typingConversationIdRef.current) => {
+      clearTypingTimer()
+
+      if (!typingSentRef.current || !conversationId || !currentUserId) {
+        return Promise.resolve()
+      }
+
+      typingSentRef.current = false
+      typingConversationIdRef.current = null
+
+      try {
+        return await stopTyping({ conversationId, userId: currentUserId })
+      } catch (error) {
+        console.error('[HomePage] Error sending StopTyping:', error)
+      }
+    },
+    [clearTypingTimer, currentUserId, stopTyping]
+  )
+
+  const scheduleStopTyping = useCallback(
+    (conversationId) => {
+      clearTypingTimer()
+      typingStopTimerRef.current = setTimeout(() => {
+        notifyStopTyping(conversationId)
+      }, TYPING_STOP_DELAY_MS)
+    },
+    [clearTypingTimer, notifyStopTyping]
+  )
+
+  const notifyUserTyping = useCallback(
+    (conversationId) => {
+      if (!conversationId || !currentUserId || !isConnected) {
+        return
+      }
+
+      const isAlreadyTypingHere =
+        typingSentRef.current && typingConversationIdRef.current === conversationId
+
+      if (!isAlreadyTypingHere) {
+        if (typingSentRef.current && typingConversationIdRef.current !== conversationId) {
+          notifyStopTyping(typingConversationIdRef.current)
+        }
+
+        typingSentRef.current = true
+        typingConversationIdRef.current = conversationId
+        userTyping({ conversationId, userId: currentUserId }).catch((error) => {
+          console.error('[HomePage] Error sending UserTyping:', error)
+          typingSentRef.current = false
+          typingConversationIdRef.current = null
+        })
+      }
+
+      scheduleStopTyping(conversationId)
+    },
+    [currentUserId, isConnected, notifyStopTyping, scheduleStopTyping, userTyping]
+  )
+
+  const removeTypingUser = useCallback((conversationId, userId) => {
+    if (!conversationId || !userId) {
+      return
+    }
+
+    setTypingByConversation((current) => {
+      const existingUsers = current[conversationId] || []
+      const nextUsers = existingUsers.filter((id) => id !== userId)
+
+      if (nextUsers.length === existingUsers.length) {
+        return current
+      }
+
+      const next = { ...current }
+      if (nextUsers.length) {
+        next[conversationId] = nextUsers
+      } else {
+        delete next[conversationId]
+      }
+      return next
+    })
+  }, [])
+
   // Subscribe to SignalR MessageReceived events
   useEffect(() => {
     if (!isConnected) {
@@ -149,10 +275,10 @@ function HomePage() {
       console.log('[HomePage] MessageReceived event:', message)
 
       const normalizedMessage = normalizeMessage(message)
-      const activeConversationId = activeConversation?.conversationId
-      const isActiveConversation = normalizedMessage.conversationId === activeConversationId
+      removeTypingUser(normalizedMessage.conversationId, normalizedMessage.senderId)
+      const isActiveMessageConversation = normalizedMessage.conversationId === activeConversationId
 
-      if (isActiveConversation) {
+      if (isActiveMessageConversation) {
         setMessages((prev) => {
           const existingIndex = prev.findIndex((item) => item.messageId === normalizedMessage.messageId)
           if (existingIndex !== -1) {
@@ -180,14 +306,12 @@ function HomePage() {
       }
 
       setMessages((prev) => {
-        let matched = false
         const nextMessages = prev.map((message) => {
           const isMatchingMessage = String(message.messageId) === String(messageId)
           const isMatchingConversation =
             !conversationId || String(message.conversationId) === String(conversationId)
 
           if (isMatchingMessage && isMatchingConversation) {
-            matched = true
             return { ...message, status: MessageStatus.Seen, seenAtUtc }
           }
           return message
@@ -196,21 +320,57 @@ function HomePage() {
       })
     }
 
+    const handleUserTyping = (payload) => {
+      if (!payload?.conversationId || !payload?.userId || payload.userId === currentUserId) {
+        return
+      }
+
+      setTypingByConversation((current) => {
+        const existingUsers = current[payload.conversationId] || []
+        if (existingUsers.includes(payload.userId)) {
+          return current
+        }
+
+        return {
+          ...current,
+          [payload.conversationId]: [...existingUsers, payload.userId],
+        }
+      })
+    }
+
+    const handleStopTyping = (payload) => {
+      removeTypingUser(payload?.conversationId, payload?.userId)
+    }
+
     const unsubscribeMessageReceived = subscribeToMessages(handleMessageReceived)
     const unsubscribeMessageSeen = subscribeToSeenUpdates(handleMessageSeen)
+    const unsubscribeUserTyping = subscribeToUserTyping(handleUserTyping)
+    const unsubscribeStopTyping = subscribeToStopTyping(handleStopTyping)
 
     return () => {
       unsubscribeMessageReceived?.()
       unsubscribeMessageSeen?.()
+      unsubscribeUserTyping?.()
+      unsubscribeStopTyping?.()
     }
   }, [
     isConnected,
-    activeConversation?.conversationId,
+    activeConversationId,
+    currentUserId,
     normalizeMessage,
+    removeTypingUser,
     updateConversationWithMessage,
     subscribeToMessages,
     subscribeToSeenUpdates,
+    subscribeToUserTyping,
+    subscribeToStopTyping,
   ])
+
+  useEffect(() => {
+    return () => {
+      notifyStopTyping()
+    }
+  }, [activeConversationId, notifyStopTyping])
 
   const handleStartConversation = async (user) => {
     try {
@@ -242,7 +402,19 @@ function HomePage() {
     }
   }
 
-const handleSendMessage = async (event) => {
+  const handleDraftChange = (event) => {
+    const nextDraft = event.target.value
+    setDraft(nextDraft)
+
+    if (!nextDraft.trim()) {
+      notifyStopTyping(activeConversation?.conversationId)
+      return
+    }
+
+    notifyUserTyping(activeConversation?.conversationId)
+  }
+
+  const handleSendMessage = async (event) => {
     event.preventDefault()
 
     if (!draft.trim() || !activeConversation?.conversationId || !activeConversation?.participantB?.id) {
@@ -250,6 +422,7 @@ const handleSendMessage = async (event) => {
     }
 
     const content = draft.trim()
+    await notifyStopTyping(activeConversation.conversationId)
     setLoading((current) => ({ ...current, sending: true }))
 
     try {
@@ -279,145 +452,56 @@ const handleSendMessage = async (event) => {
       setLoading((current) => ({ ...current, sending: false }))
     }
   }
+
+  const [isMobileChatActive, setIsMobileChatActive] = useState(false)
+
+  const handleSelectConversation = useCallback((conversation) => {
+    setActiveConversation(conversation)
+    setIsMobileChatActive(true)
+  }, [])
+
+  const handleBackToList = useCallback(() => {
+    setIsMobileChatActive(false)
+  }, [])
+
+  const handleStartConversationWrapper = async (user) => {
+    await handleStartConversation(user)
+    setIsMobileChatActive(true)
+  }
+
   return (
-    <section className="flex h-[calc(100dvh-7.5rem)] flex-col overflow-hidden rounded-[2rem] border border-sky-200/20 bg-slate-900/75 shadow-[0_25px_120px_-40px_rgba(34,211,238,0.55)] lg:flex-row">
-      <aside className="flex w-full flex-col border-b border-sky-200/10 bg-slate-950/70 lg:w-[360px] lg:border-b-0 lg:border-r">
-        <div className="flex items-center justify-between border-b border-sky-200/10 px-4 py-4 sm:px-5">
-          <div>
-            <p className="text-sm text-sky-200/80">Workspace</p>
-            <h2 className="text-xl font-semibold text-white">Chats</h2>
-          </div>
-          <div className="rounded-full border border-sky-400/30 bg-sky-400/10 px-3 py-1 text-sm font-medium text-sky-200">
-            Live
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-3 py-3 sm:px-4">
-          <div className="mb-4 border-b border-sky-200/10 pb-4">
-            <label className="mb-2 block px-1 text-sm font-semibold text-slate-300" htmlFor="user-email-search">
-              Search user by email
-            </label>
-            <input
-              id="user-email-search"
-              type="email"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="w-full rounded-xl border border-sky-200/10 bg-slate-900/70 px-3 py-2.5 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-sky-300/50"
-              placeholder="Enter email id"
-            />
-            <div className="mt-3">
-              {search.trim() ? (
-                <UserSearchList
-                  users={filteredUsers}
-                  loading={loading.users}
-                  onStartConversation={handleStartConversation}
-                />
-              ) : (
-                <p className="rounded-xl border border-dashed border-sky-200/10 bg-slate-900/50 px-3 py-3 text-sm text-slate-400">
-                  Type an email id to find a user.
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="mb-3">
-            <div className="mb-2 flex items-center justify-between px-1">
-              <p className="text-sm font-semibold text-slate-300">Conversations</p>
-              {loading.conversations ? <span className="text-xs text-sky-200">Loading…</span> : null}
-            </div>
-            {conversations.length === 0 ? (
-              <div className="text-sm text-slate-400">No conversations yet</div>
-            ) : (
-              <div className="space-y-2">
-                {conversations.map((conversation) => (
-                  <button
-                    key={conversation.conversationId}
-                    onClick={() => setActiveConversation(conversation)}
-                    className={`w-full rounded-xl border px-3 py-3 text-left transition ${
-                      activeConversation?.conversationId === conversation.conversationId
-                        ? 'border-sky-400/40 bg-sky-400/10'
-                        : 'border-sky-200/10 bg-slate-900/50 hover:bg-slate-900/70'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium text-white">{formatDisplayName(conversation.participantB)}</p>
-                      {conversation.unseenMessageCount > 0 && (
-                        <span className="rounded-full bg-sky-400 px-2 py-0.5 text-xs font-semibold text-slate-950">
-                          {conversation.unseenMessageCount}
-                        </span>
-                      )}
-                    </div>
-                    {conversation.lastMessageAtUtc && (
-                      <p className="mt-1 text-xs text-slate-400">
-                        {new Date(conversation.lastMessageAtUtc).toLocaleDateString(undefined, {
-                          month: 'short',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </p>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
-
-      <div className="flex flex-1 flex-col bg-slate-950/60">
-        <div className="flex items-center justify-between border-b border-sky-200/10 px-4 py-4 sm:px-5">
-          <div>
-            <p className="text-sm text-sky-200/80">Active chat</p>
-            <h3 className="text-lg font-semibold text-white">
-              {activeConversation?.participantB ? formatDisplayName(activeConversation.participantB) : 'Select a conversation'}
-            </h3>
-          </div>
-          <div className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-sm text-emerald-300">
-            Online
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),_transparent_35%)] px-3 py-4 sm:px-4">
-          {status ? <div className="mb-3 rounded-2xl border border-sky-200/10 bg-slate-900/80 px-3 py-2 text-sm text-sky-200">{status}</div> : null}
-
-          {loading.messages ? (
-            <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading messages…</div>
-          ) : messages.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center rounded-[1.5rem] border border-dashed border-sky-200/10 bg-slate-900/70 p-6 text-center text-slate-400">
-              <p className="text-lg font-medium text-white">No messages yet</p>
-              <p className="mt-2 max-w-sm text-sm">Send the first message to start your conversation.</p>
-            </div>
-          ) : (
-            <MessageList
-              messages={messages}
-              activeConversation={activeConversation}
-              isMessageMine={isMessageMine}
-              markMessageSeen={markMessageSeen}
-            />
-          )}
-        </div>
-
-        <form onSubmit={handleSendMessage} className="border-t border-sky-200/10 bg-slate-950/80 px-3 py-3 sm:px-4">
-          <div className="flex items-center gap-2 rounded-[1.2rem] border border-sky-200/10 bg-slate-900/80 px-3 py-2.5">
-            <input
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              className="flex-1 bg-transparent text-sm text-slate-100 outline-none"
-              placeholder={activeConversation ? 'Type a message' : 'Select a conversation first'}
-              disabled={!activeConversation}
-            />
-            <button
-              type="submit"
-              disabled={!activeConversation || !draft.trim() || loading.sending}
-              className="rounded-full bg-sky-400 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading.sending ? 'Sending…' : 'Send'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </section>
+    <ChatLayout 
+      isChatActive={isMobileChatActive}
+      sidebar={
+        <Sidebar 
+          search={search}
+          onSearchChange={setSearch}
+          filteredUsers={filteredUsers}
+          loading={loading}
+          onStartConversation={handleStartConversationWrapper}
+          conversations={conversations}
+          activeConversation={activeConversation}
+          onSelectConversation={handleSelectConversation}
+          isParticipantTyping={isParticipantTyping}
+        />
+      }
+      chatArea={
+        <ChatArea 
+          activeConversation={activeConversation}
+          messages={messages}
+          loadingMessages={loading.messages}
+          isMessageMine={isMessageMine}
+          markMessageSeen={markMessageSeen}
+          isActiveParticipantTyping={isActiveParticipantTyping}
+          draft={draft}
+          onDraftChange={handleDraftChange}
+          onSendMessage={handleSendMessage}
+          sending={loading.sending}
+          onBack={handleBackToList}
+          statusMessage={status}
+        />
+      }
+    />
   )
 }
 

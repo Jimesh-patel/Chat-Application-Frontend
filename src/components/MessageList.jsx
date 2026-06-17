@@ -46,7 +46,6 @@ export function MessageList({
       },
       { threshold: 0.6 }
     )
-
     const nodes = container.querySelectorAll('.message-item')
     nodes.forEach((node) => observer.observe(node))
 
@@ -54,8 +53,8 @@ export function MessageList({
   }, [activeConversation?.conversationId, isMessageMine, markMessageSeen, messages])
 
   return (
-    <div ref={messagesListRef} className="flex-1 overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.14),_transparent_35%)] px-3 py-4 sm:px-4">
-      <div className="space-y-3">
+    <div ref={messagesListRef} className="flex flex-col gap-1 w-full">
+      <div className="space-y-1">
         {messages.map((message) => (
           <MessageItem
             key={message.messageId || message.sentAtUtc}

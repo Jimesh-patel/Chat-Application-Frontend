@@ -5,18 +5,20 @@ export function MessageItem({ message, isMine }) {
   const statusInfo = renderStatus(message)
 
   return (
-    <div className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex w-full mb-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
       <div
         data-message-id={message.messageId}
-        className={`message-item max-w-[82%] rounded-[1.25rem] px-4 py-3 shadow-lg ${
-          isMine ? 'bg-sky-400 text-slate-950' : 'bg-slate-900/90 text-slate-100'
+        className={`message-item relative max-w-[85%] sm:max-w-[75%] px-3.5 py-2 shadow-sm ${
+          isMine 
+            ? 'bg-violet-500 text-white rounded-2xl rounded-tr-sm' 
+            : 'bg-slate-800 text-slate-100 rounded-2xl rounded-tl-sm border border-violet-500/10'
         }`}
       >
-        <p className="mt-1 text-sm leading-6">{message.content}</p>
-        <div className="mt-2 flex items-center justify-between text-[11px]">
-          <span className={isMine ? 'text-slate-800/80' : 'text-slate-400'}>{formatTime(message.sentAtUtc)}</span>
+        <p className="text-[15px] leading-relaxed break-words">{message.content}</p>
+        <div className="mt-1 flex items-center justify-end gap-1.5 text-[11px] font-medium opacity-80">
+          <span>{formatTime(message.sentAtUtc)}</span>
           {isMine ? (
-            <span className={`ml-3 ${statusInfo.className}`} title={statusInfo.title}>
+            <span className={statusInfo.className} title={statusInfo.title}>
               {statusInfo.symbol}
             </span>
           ) : null}

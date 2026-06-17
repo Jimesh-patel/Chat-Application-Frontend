@@ -1,5 +1,5 @@
-import { useContext, useCallback, useEffect, useRef } from 'react'
-import { SignalRContext } from '../context/SignalRContext'
+import { useContext, useCallback, useEffect, useRef, useMemo } from 'react'
+import { SignalRContext } from '../context/signalRContextValue'
 import { chatHub } from '../services/signalr/chatHub'
 
 /**
@@ -77,6 +77,16 @@ export function useChatHub() {
     [subscribeToEvent]
   )
 
+  const subscribeToUserTyping = useCallback(
+    (callback) => subscribeToEvent('UserTyping', callback),
+    [subscribeToEvent]
+  )
+
+  const subscribeToStopTyping = useCallback(
+    (callback) => subscribeToEvent('StopTyping', callback),
+    [subscribeToEvent]
+  )
+
   /**
    * Clean up all subscriptions when component unmounts
    */
@@ -96,14 +106,22 @@ export function useChatHub() {
     }
   }, [])
 
+  const apiMethods = useMemo(() => ({
+    sendMessage: chatHub.sendMessage.bind(chatHub),
+    markMessageDelivered: chatHub.markMessageDelivered.bind(chatHub),
+    markMessageSeen: chatHub.markMessageSeen.bind(chatHub),
+    userTyping: chatHub.userTyping.bind(chatHub),
+    stopTyping: chatHub.stopTyping.bind(chatHub),
+  }), [])
+
   return {
     isConnected,
     connection: chatHub.connection,
     subscribeToMessages,
     subscribeToDeliveryUpdates,
     subscribeToSeenUpdates,
-    sendMessage: chatHub.sendMessage.bind(chatHub),
-    markMessageDelivered: chatHub.markMessageDelivered.bind(chatHub),
-    markMessageSeen: chatHub.markMessageSeen.bind(chatHub),
+    subscribeToUserTyping,
+    subscribeToStopTyping,
+    ...apiMethods
   }
 }
