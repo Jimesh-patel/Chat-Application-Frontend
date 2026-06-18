@@ -87,6 +87,16 @@ export function useChatHub() {
     [subscribeToEvent]
   )
 
+  const subscribeToPresenceOnline = useCallback(
+    (callback) => subscribeToEvent('PresenceOnline', callback),
+    [subscribeToEvent]
+  )
+
+  const subscribeToPresenceOffline = useCallback(
+    (callback) => subscribeToEvent('PresenceOffline', callback),
+    [subscribeToEvent]
+  )
+
   /**
    * Clean up all subscriptions when component unmounts
    */
@@ -112,6 +122,8 @@ export function useChatHub() {
     markMessageSeen: chatHub.markMessageSeen.bind(chatHub),
     userTyping: chatHub.userTyping.bind(chatHub),
     stopTyping: chatHub.stopTyping.bind(chatHub),
+    subscribeToPresence: chatHub.subscribeToPresence.bind(chatHub),
+    unsubscribeFromPresence: chatHub.unsubscribeFromPresence.bind(chatHub),
   }), [])
 
   return {
@@ -122,6 +134,8 @@ export function useChatHub() {
     subscribeToSeenUpdates,
     subscribeToUserTyping,
     subscribeToStopTyping,
+    subscribeToPresenceOnline,
+    subscribeToPresenceOffline,
     ...apiMethods
   }
 }

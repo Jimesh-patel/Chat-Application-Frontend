@@ -237,6 +237,14 @@ class ChatHub {
     return this.invoke('StopTyping', command)
   }
 
+  async subscribeToPresence(targetUserId) {
+    return this.invoke('SubscribeToPresence', targetUserId)
+  }
+
+  async unsubscribeFromPresence(targetUserId) {
+    return this.invoke('UnsubscribeFromPresence', targetUserId)
+  }
+
   getState() {
     return this.connection?.state || 'Disconnected'
   }

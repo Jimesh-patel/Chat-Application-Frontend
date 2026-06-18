@@ -18,6 +18,7 @@ function HomePage() {
   const [draft, setDraft] = useState('')
   const [status, setStatus] = useState('')
   const [typingByConversation, setTypingByConversation] = useState({})
+  const [participantPresence, setParticipantPresence] = useState({ isOnline: false, lastSeenAtUtc: null })
   const [loading, setLoading] = useState({ users: false, conversations: false, messages: false, sending: false })
   const currentUserId = useMemo(() => getCurrentUserId(), [])
   const activeConversationId = activeConversation?.conversationId
@@ -32,6 +33,10 @@ function HomePage() {
     subscribeToSeenUpdates,
     subscribeToUserTyping,
     subscribeToStopTyping,
+    subscribeToPresenceOnline,
+    subscribeToPresenceOffline,
+    subscribeToPresence,
+    unsubscribeFromPresence,
     sendMessage,
     markMessageSeen,
     userTyping,
@@ -131,8 +136,20 @@ function HomePage() {
       queueMicrotask(() => {
         loadMessages(activeConversationId)
       })
+      setParticipantPresence({ isOnline: false, lastSeenAtUtc: null })
     }
   }, [activeConversationId, loadMessages])
+
+  useEffect(() => {
+    if (activeConversation?.participantB?.id && isConnected) {
+      const targetUserId = activeConversation.participantB.id
+      subscribeToPresence(targetUserId).catch(err => console.error('Failed to subscribe to presence', err))
+
+      return () => {
+        unsubscribeFromPresence(targetUserId).catch(err => console.error('Failed to unsubscribe from presence', err))
+      }
+    }
+  }, [activeConversation?.participantB?.id, isConnected, subscribeToPresence, unsubscribeFromPresence])
 
   const updateConversationWithMessage = useCallback((message) => {
     setConversations((current) => {
@@ -342,19 +359,36 @@ function HomePage() {
       removeTypingUser(payload?.conversationId, payload?.userId)
     }
 
+    const handlePresenceOnline = (payload) => {
+      if (payload?.userId === activeConversation?.participantB?.id) {
+        setParticipantPresence({ isOnline: true, lastSeenAtUtc: null })
+      }
+    }
+
+    const handlePresenceOffline = (payload) => {
+      if (payload?.userId === activeConversation?.participantB?.id) {
+        setParticipantPresence({ isOnline: false, lastSeenAtUtc: payload?.lastSeenAtUtc })
+      }
+    }
+
     const unsubscribeMessageReceived = subscribeToMessages(handleMessageReceived)
     const unsubscribeMessageSeen = subscribeToSeenUpdates(handleMessageSeen)
     const unsubscribeUserTyping = subscribeToUserTyping(handleUserTyping)
     const unsubscribeStopTyping = subscribeToStopTyping(handleStopTyping)
+    const unsubscribePresenceOnline = subscribeToPresenceOnline(handlePresenceOnline)
+    const unsubscribePresenceOffline = subscribeToPresenceOffline(handlePresenceOffline)
 
     return () => {
       unsubscribeMessageReceived?.()
       unsubscribeMessageSeen?.()
       unsubscribeUserTyping?.()
       unsubscribeStopTyping?.()
+      unsubscribePresenceOnline?.()
+      unsubscribePresenceOffline?.()
     }
   }, [
     isConnected,
+    activeConversation?.participantB?.id,
     activeConversationId,
     currentUserId,
     normalizeMessage,
@@ -364,6 +398,8 @@ function HomePage() {
     subscribeToSeenUpdates,
     subscribeToUserTyping,
     subscribeToStopTyping,
+    subscribeToPresenceOnline,
+    subscribeToPresenceOffline,
   ])
 
   useEffect(() => {
@@ -493,6 +529,7 @@ function HomePage() {
           isMessageMine={isMessageMine}
           markMessageSeen={markMessageSeen}
           isActiveParticipantTyping={isActiveParticipantTyping}
+          participantPresence={participantPresence}
           draft={draft}
           onDraftChange={handleDraftChange}
           onSendMessage={handleSendMessage}

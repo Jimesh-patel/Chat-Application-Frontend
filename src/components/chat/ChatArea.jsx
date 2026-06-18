@@ -10,6 +10,7 @@ export function ChatArea({
   isMessageMine,
   markMessageSeen,
   isActiveParticipantTyping,
+  participantPresence,
   draft,
   onDraftChange,
   onSendMessage,
@@ -52,13 +53,18 @@ export function ChatArea({
             </div>
           </div>
         </div>
-        {activeConversation && (
+        {activeConversation && participantPresence?.isOnline && (
           <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400 shadow-sm">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
             </span>
             Online
+          </div>
+        )}
+        {activeConversation && !participantPresence?.isOnline && participantPresence?.lastSeenAtUtc && (
+          <div className="flex items-center gap-1.5 rounded-full border border-slate-500/20 bg-slate-500/10 px-2.5 py-1 text-xs font-medium text-slate-400 shadow-sm">
+            Last seen {new Date(participantPresence.lastSeenAtUtc).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
         )}
       </div>
